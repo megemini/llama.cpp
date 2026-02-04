@@ -429,6 +429,7 @@ class MODEL_ARCH(IntEnum):
     AFMOE            = auto()
     ERNIE4_5         = auto()
     ERNIE4_5_MOE     = auto()
+    ERNIE4_5_VL_MOE  = auto()
     HUNYUAN_MOE      = auto()
     HUNYUAN_DENSE    = auto()
     SMOLLM3          = auto()
@@ -688,6 +689,12 @@ class MODEL_TENSOR(IntEnum):
     V_MM_GATE            = auto() # cogvlm
     V_TOK_BOI            = auto() # cogvlm
     V_TOK_EOI            = auto() # cogvlm
+    V_FFN_GATE_INP       = auto()
+    V_FFN_GATE_EXPS       = auto()
+    V_FFN_DOWN_EXPS       = auto()
+    V_FFN_UP_EXPS         = auto()
+    V_FFN_EXP_PROBS_B    = auto()
+
     # audio (mtmd)
     A_ENC_EMBD_POS       = auto()
     A_ENC_CONV1D         = auto()
@@ -805,6 +812,7 @@ MODEL_ARCH_NAMES: dict[MODEL_ARCH, str] = {
     MODEL_ARCH.AFMOE:            "afmoe",
     MODEL_ARCH.ERNIE4_5:         "ernie4_5",
     MODEL_ARCH.ERNIE4_5_MOE:     "ernie4_5-moe",
+    MODEL_ARCH.ERNIE4_5_VL_MOE:  "ernie4_5-vl-moe",
     MODEL_ARCH.FALCON_H1:        "falcon-h1",
     MODEL_ARCH.HUNYUAN_MOE:      "hunyuan-moe",
     MODEL_ARCH.HUNYUAN_DENSE:    "hunyuan-dense",
@@ -1063,6 +1071,12 @@ TENSOR_NAMES: dict[MODEL_TENSOR, str] = {
     MODEL_TENSOR.V_MM_GATE:                 "mm.gate",
     MODEL_TENSOR.V_TOK_BOI:                 "v.boi",
     MODEL_TENSOR.V_TOK_EOI:                 "v.eoi",
+    MODEL_TENSOR.V_FFN_GATE_INP:            "blk.{bid}.v_ffn_gate_inp", # ernie4_5_vl_moe
+    MODEL_TENSOR.V_FFN_GATE_EXPS:            "blk.{bid}.v_ffn_gate_exps", # ernie4_5_vl_moe
+    MODEL_TENSOR.V_FFN_DOWN_EXPS:            "blk.{bid}.v_ffn_down_exps", # ernie4_5_vl_moe
+    MODEL_TENSOR.V_FFN_UP_EXPS:              "blk.{bid}.v_ffn_up_exps", # ernie4_5_vl_moe
+    MODEL_TENSOR.V_FFN_EXP_PROBS_B:         "blk.{bid}.v_exp_probs_b", # ernie4_5_vl_moe
+
     # audio (mtmd)
     MODEL_TENSOR.A_ENC_EMBD_POS:            "a.position_embd",
     MODEL_TENSOR.A_ENC_CONV1D:              "a.conv1d.{bid}",
@@ -2352,6 +2366,33 @@ MODEL_TENSORS: dict[MODEL_ARCH, list[MODEL_TENSOR]] = {
         MODEL_TENSOR.FFN_UP_SHEXP,
         MODEL_TENSOR.FFN_EXP_PROBS_B,
     ],
+    MODEL_ARCH.ERNIE4_5_VL_MOE: [
+        MODEL_TENSOR.TOKEN_EMBD,
+        MODEL_TENSOR.OUTPUT_NORM,
+        MODEL_TENSOR.OUTPUT,
+        MODEL_TENSOR.ATTN_NORM,
+        MODEL_TENSOR.ATTN_Q,
+        MODEL_TENSOR.ATTN_K,
+        MODEL_TENSOR.ATTN_V,
+        MODEL_TENSOR.ATTN_OUT,
+        MODEL_TENSOR.FFN_NORM,
+        MODEL_TENSOR.FFN_GATE,
+        MODEL_TENSOR.FFN_DOWN,
+        MODEL_TENSOR.FFN_UP,
+        MODEL_TENSOR.FFN_GATE_INP,
+        MODEL_TENSOR.FFN_GATE_EXP,
+        MODEL_TENSOR.FFN_DOWN_EXP,
+        MODEL_TENSOR.FFN_UP_EXP,
+        MODEL_TENSOR.FFN_EXP_PROBS_B,
+        MODEL_TENSOR.V_FFN_GATE_INP,
+        MODEL_TENSOR.V_FFN_GATE_EXPS,
+        MODEL_TENSOR.V_FFN_DOWN_EXPS,
+        MODEL_TENSOR.V_FFN_UP_EXPS,
+        MODEL_TENSOR.V_FFN_EXP_PROBS_B,
+        MODEL_TENSOR.FFN_GATE_SHEXP,
+        MODEL_TENSOR.FFN_DOWN_SHEXP,
+        MODEL_TENSOR.FFN_UP_SHEXP,
+    ],
     MODEL_ARCH.PLM: [
         MODEL_TENSOR.TOKEN_EMBD,
         MODEL_TENSOR.OUTPUT,
@@ -3364,6 +3405,7 @@ class VisionProjectorType:
     COGVLM = "cogvlm"
     JANUS_PRO = "janus_pro"
     GLM4V = "glm4v"
+    ERNIE45VLMOE = "ernie4.5vl_moe"
 
 
 # Items here are (block size, type size)

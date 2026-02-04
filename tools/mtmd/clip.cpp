@@ -829,6 +829,10 @@ static ggml_cgraph * clip_image_build_graph(clip_ctx * ctx, const clip_image_f32
             {
                 builder = std::make_unique<clip_graph_cogvlm>(ctx, img);
             } break;
+        case PROJECTOR_TYPE_ERNIE45VLMOE:
+            {
+                builder = std::make_unique<clip_graph_ernie45vlmoe>(ctx, img);
+            } break;
         case PROJECTOR_TYPE_MLP:
         case PROJECTOR_TYPE_MLP_NORM:
         case PROJECTOR_TYPE_LDP:
@@ -1129,6 +1133,20 @@ struct clip_model_loader {
                         hparams.set_limit_image_tokens(8, 1024);
                         hparams.set_warmup_n_tokens(256); // avoid OOM on warmup
                     } break;
+                case PROJECTOR_TYPE_ERNIE45VLMOE:
+                {
+                    // defaults
+                    hparams.n_merge = 2;
+
+                    hparams.spatial_conv_size  = 2;
+                    hparams.temporal_conv_size = 2;
+                    hparams.use_temporal_conv  = model.mm_temp_0_w != nullptr;
+
+                    // todo(megemini):
+                    hparams.set_limit_image_tokens(8, 1024);
+                    hparams.set_warmup_n_tokens(256); // avoid OOM on warmup
+
+                } break;
                 case PROJECTOR_TYPE_GEMMA3:
                     {
                         // default value (used by all model sizes in gemma 3 family)
@@ -1610,6 +1628,29 @@ struct clip_model_loader {
                     model.mm_0_b = get_tensor(string_format(TN_LLAVA_PROJ, 0, "bias"));
                     model.mm_1_w = get_tensor(string_format(TN_LLAVA_PROJ, 1, "weight"));
                     model.mm_1_b = get_tensor(string_format(TN_LLAVA_PROJ, 1, "bias"));
+                } break;
+            case PROJECTOR_TYPE_ERNIE45VLMOE:
+                {
+                    // spatial path
+                    model.mm_spatial_0_w    = get_tensor("mm.0.weight");
+                    model.mm_spatial_0_b    = get_tensor("mm.0.bias");
+                    model.mm_spatial_2_w    = get_tensor("mm.2.weight");
+                    model.mm_spatial_2_b    = get_tensor("mm.2.bias");
+                    model.mm_spatial_norm_w = get_tensor("mm.3.weight");
+                    model.mm_spatial_norm_b = get_tensor("mm.3.bias", false);
+
+                    // temporal path (optional, not used for single images)
+                    model.mm_temp_0_w    = get_tensor("mm_temp.0.weight", false);
+                    model.mm_temp_0_b    = get_tensor("mm_temp.0.bias",   false);
+                    model.mm_temp_2_w    = get_tensor("mm_temp.2.weight", false);
+                    model.mm_temp_2_b    = get_tensor("mm_temp.2.bias",   false);
+                    model.mm_temp_norm_w = get_tensor("mm_temp.3.weight", false);
+                    model.mm_temp_norm_b = get_tensor("mm_temp.3.bias",   false);
+
+                    // output
+                    model.mm_mlp_w        = get_tensor("mm.mlp.weight");
+                    model.mm_mlp_b        = get_tensor("mm.mlp.bias");
+                    model.mm_after_norm_w = get_tensor("mm.norm.weight");
                 } break;
             default:
                 GGML_ASSERT(false && "unknown projector type");
@@ -2702,6 +2743,7 @@ bool clip_image_preprocess(struct clip_ctx * ctx, const clip_image_u8 * img, str
 
         case PROJECTOR_TYPE_PIXTRAL:
         case PROJECTOR_TYPE_LIGHTONOCR:
+        case PROJECTOR_TYPE_ERNIE45VLMOE:
             {
                 GGML_ASSERT(params.image_min_pixels > 0 && params.image_max_pixels > 0);
                 clip_image_u8 resized_image;
@@ -2857,6 +2899,7 @@ int clip_n_output_tokens_x(const struct clip_ctx * ctx, struct clip_image_f32 * 
         case PROJECTOR_TYPE_QWEN25VL:
         case PROJECTOR_TYPE_QWEN3VL:
         case PROJECTOR_TYPE_GLM4V:
+        // case PROJECTOR_TYPE_ERNIE45VLMOE:
             return (img->nx / params.patch_size) / 2;
         default:
             break;
@@ -2872,6 +2915,7 @@ int clip_n_output_tokens_y(const struct clip_ctx * ctx, struct clip_image_f32 * 
         case PROJECTOR_TYPE_QWEN25VL:
         case PROJECTOR_TYPE_QWEN3VL:
         case PROJECTOR_TYPE_GLM4V:
+        // case PROJECTOR_TYPE_ERNIE45VLMOE:
             return (img->ny / params.patch_size) / 2;
         default:
             break;
@@ -2932,6 +2976,8 @@ int clip_n_output_tokens(const struct clip_ctx * ctx, struct clip_image_f32 * im
         case PROJECTOR_TYPE_QWEN25VL:
         case PROJECTOR_TYPE_QWEN3VL:
         case PROJECTOR_TYPE_GLM4V:
+        // todo(megemini):
+        case PROJECTOR_TYPE_ERNIE45VLMOE:
             {
                 // dynamic size (2 conv, so double patch size)
                 int x_patch = img->nx / (params.patch_size * 2);
@@ -3180,6 +3226,7 @@ bool clip_image_batch_encode(clip_ctx * ctx, const int n_threads, const clip_ima
         case PROJECTOR_TYPE_QWEN2VL:
         case PROJECTOR_TYPE_QWEN3VL:
         case PROJECTOR_TYPE_GLM4V:
+        // case PROJECTOR_TYPE_ERNIE45VLMOE:
             {
                 const int merge_ratio = hparams.n_merge;
                 const int pw = image_size_width  / patch_size;
@@ -3201,6 +3248,40 @@ bool clip_image_batch_encode(clip_ctx * ctx, const int n_threads, const clip_ima
                 }
 
                 set_input_i32("positions", positions);
+            } break;
+        case PROJECTOR_TYPE_ERNIE45VLMOE:
+            {
+                fprintf(stderr, "[DEBUG] merge_ratio  %d: \n", hparams.n_merge);
+                fprintf(stderr, "[DEBUG] patch_size  %d: \n", patch_size);
+                fprintf(stderr, "[DEBUG] image_size_width  %d: \n", image_size_width);
+                fprintf(stderr, "[DEBUG] image_size_height  %d: \n", image_size_height);
+
+                fprintf(stderr, "[DEBUG] pw  %d: \n", image_size_width  / patch_size);
+                fprintf(stderr, "[DEBUG] ph  %d: \n", image_size_height / patch_size);
+
+
+
+                const int merge_ratio = 2;
+                const int pw = image_size_width  / 14;
+                const int ph = image_size_height / 14;
+                std::vector<int> positions(n_pos * 4);
+                int ptr = 0;
+                for (int y = 0; y < ph; y += merge_ratio) {
+                    for (int dy = 0; dy < 2; dy++) {
+                        for (int x = 0; x < pw; x += merge_ratio) {
+                            for (int dx = 0; dx < 2; dx++) {
+                                positions[                  ptr] = y + dy;
+                                positions[    num_patches + ptr] = x + dx;
+                                positions[2 * num_patches + ptr] = y + dy;
+                                positions[3 * num_patches + ptr] = x + dx;
+                                ptr++;
+                            }
+                        }
+                    }
+                }
+
+                set_input_i32("positions", positions);
+
             } break;
         case PROJECTOR_TYPE_QWEN25VL:
             {
@@ -3342,6 +3423,8 @@ bool clip_image_batch_encode(clip_ctx * ctx, const int n_threads, const clip_ima
         case PROJECTOR_TYPE_VOXTRAL:
         case PROJECTOR_TYPE_JANUS_PRO:
         case PROJECTOR_TYPE_COGVLM:
+        // todo(megemini):
+        // case PROJECTOR_TYPE_ERNIE45VLMOE:
             {
                 // do nothing
             } break;
@@ -3456,6 +3539,10 @@ int clip_n_mmproj_embd(const struct clip_ctx * ctx) {
             return ctx->model.mm_2_w->ne[1];
         case PROJECTOR_TYPE_COGVLM:
             return ctx->model.mm_4h_to_h_w->ne[1];
+        case PROJECTOR_TYPE_ERNIE45VLMOE:
+            // todo(megemini):
+            // return ctx->model.mm_mlp_w->ne[1];
+            return ctx->model.mm_mlp_w->ne[0];
         case PROJECTOR_TYPE_GLM4V:
             return ctx->model.mm_ffn_down_w->ne[1];
         default:
@@ -3478,6 +3565,7 @@ bool clip_is_mrope(const struct clip_ctx * ctx) {
     return ctx->proj_type() == PROJECTOR_TYPE_QWEN2VL
         || ctx->proj_type() == PROJECTOR_TYPE_QWEN25VL
         || ctx->proj_type() == PROJECTOR_TYPE_QWEN3VL
+        // || ctx->proj_type() == PROJECTOR_TYPE_ERNIE45VLMOE
         || ctx->proj_type() == PROJECTOR_TYPE_GLM4V;
 }
 

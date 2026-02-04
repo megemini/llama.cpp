@@ -382,6 +382,11 @@ class TensorNameMap:
             "backbone.layers.{bid}.mixer.gate",                 # nemotron-h-moe
         ),
 
+        MODEL_TENSOR.V_FFN_GATE_INP: (
+            # todo(megemini):
+            "model.layers.{bid}.mlp.gate.vision",              # ernie4.5vl-moe
+        ),
+
         MODEL_TENSOR.FFN_GATE_INP_SHEXP: (
             "model.layers.{bid}.mlp.shared_expert_gate", # qwen2moe
         ),
@@ -394,6 +399,10 @@ class TensorNameMap:
             "model.layers.{bid}.feed_forward.expert_bias",                  # lfm2moe
             "model.layers.{bid}.block_sparse_moe.e_score_correction",       # minimax-m2
             "backbone.layers.{bid}.mixer.gate.e_score_correction"           # nemotron-h-moe
+        ),
+
+        MODEL_TENSOR.V_FFN_EXP_PROBS_B: (
+            "model.layers.{bid}.mlp.moe_statics.e_score_correction.vision",        # ernie4.5-moe-vl
         ),
 
         # Feed-forward up
@@ -448,6 +457,9 @@ class TensorNameMap:
             "encoder.layers.{bid}.mlp.experts.mlp.w1",              # nomic-bert-moe
             "model.layers.{bid}.block_sparse_moe.experts.up", # smallthinker
         ),
+        MODEL_TENSOR.V_FFN_UP_EXPS: (
+            "model.vision.layers.{bid}.mlp.experts.up_proj",               # ernie4.5-vl-moe
+        ),
 
         MODEL_TENSOR.FFN_UP_SHEXP: (
             "model.layers.{bid}.mlp.shared_expert.up_proj",          # qwen2moe
@@ -496,6 +508,9 @@ class TensorNameMap:
             "model.layers.{bid}.block_sparse_moe.experts.w1",           # phimoe (merged)
             "model.layers.{bid}.feed_forward.experts.gate_proj",        # llama4
             "model.layers.{bid}.block_sparse_moe.experts.gate",         # smallthinker
+        ),
+        MODEL_TENSOR.V_FFN_GATE_EXPS: (
+            "model.vision.layers.{bid}.mlp.experts.gate_proj",                 # ernie4.5-vl-moe
         ),
 
         MODEL_TENSOR.FFN_GATE_SHEXP: (
@@ -557,6 +572,9 @@ class TensorNameMap:
             "model.layers.{bid}.feed_forward.experts.down_proj",    # llama4
             "encoder.layers.{bid}.mlp.experts.mlp.w2",              # nomic-bert-moe
             "model.layers.{bid}.block_sparse_moe.experts.down",     # smallthinker
+        ),
+        MODEL_TENSOR.V_FFN_DOWN_EXPS: (
+            "model.vision.layers.{bid}.mlp.experts.down_proj",      # ernie4.5-vl-moe
         ),
 
         MODEL_TENSOR.FFN_DOWN_SHEXP: (

@@ -2899,7 +2899,7 @@ int clip_n_output_tokens_x(const struct clip_ctx * ctx, struct clip_image_f32 * 
         case PROJECTOR_TYPE_QWEN25VL:
         case PROJECTOR_TYPE_QWEN3VL:
         case PROJECTOR_TYPE_GLM4V:
-        // case PROJECTOR_TYPE_ERNIE45VLMOE:
+        case PROJECTOR_TYPE_ERNIE45VLMOE:
             return (img->nx / params.patch_size) / 2;
         default:
             break;
@@ -2915,7 +2915,7 @@ int clip_n_output_tokens_y(const struct clip_ctx * ctx, struct clip_image_f32 * 
         case PROJECTOR_TYPE_QWEN25VL:
         case PROJECTOR_TYPE_QWEN3VL:
         case PROJECTOR_TYPE_GLM4V:
-        // case PROJECTOR_TYPE_ERNIE45VLMOE:
+        case PROJECTOR_TYPE_ERNIE45VLMOE:
             return (img->ny / params.patch_size) / 2;
         default:
             break;
@@ -3565,7 +3565,7 @@ bool clip_is_mrope(const struct clip_ctx * ctx) {
     return ctx->proj_type() == PROJECTOR_TYPE_QWEN2VL
         || ctx->proj_type() == PROJECTOR_TYPE_QWEN25VL
         || ctx->proj_type() == PROJECTOR_TYPE_QWEN3VL
-        // || ctx->proj_type() == PROJECTOR_TYPE_ERNIE45VLMOE
+        || ctx->proj_type() == PROJECTOR_TYPE_ERNIE45VLMOE
         || ctx->proj_type() == PROJECTOR_TYPE_GLM4V;
 }
 

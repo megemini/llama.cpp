@@ -22,7 +22,6 @@ ggml_cgraph * clip_graph_ernie45vlmoe::build() {
     int mrope_sections[4] = {d_head/4, d_head/4, d_head/4, d_head/4};
 
     const int num_position_ids = n_pos * 4; // m-rope requires 4 dim per position
-
     ggml_tensor * positions = ggml_new_tensor_1d(ctx0, GGML_TYPE_I32, num_position_ids);
     ggml_set_name(positions, "positions");
     ggml_set_input(positions);
@@ -33,33 +32,6 @@ ggml_cgraph * clip_graph_ernie45vlmoe::build() {
     // Note: patch_embeddings_0 is reshaped to 4D during export for conv2d compatibility
     ggml_tensor * inp = build_inp();
 
-
-    // ggml_tensor * inp_raw = build_inp_raw();
-
-    // fprintf(stderr, "%s: inp_raw shape: [%lld, %lld, %lld, %lld]\n", __func__, inp_raw->ne[0],
-    //         inp_raw->ne[1],inp_raw->ne[2],inp_raw->ne[3]);
-
-    // ggml_tensor * inp = ggml_reshape_2d(ctx0, inp_raw, n_patches, n_embd);
-
-
-    // fprintf(stderr, "%s: 1 inp shape: [%lld, %lld, %lld, %lld]\n", __func__, inp->ne[0],
-    //         inp->ne[1],inp->ne[2],inp->ne[3]);
-
-    // inp = ggml_cont(ctx0, ggml_transpose(ctx0, inp));
-
-    // fprintf(stderr, "%s: 2 inp shape: [%lld, %lld, %lld, %lld]\n", __func__, inp->ne[0],
-    //         inp->ne[1],inp->ne[2],inp->ne[3]);
-
-    // inp = ggml_mul_mat(ctx0, inp, model.patch_embeddings_0);
-
-    // fprintf(stderr, "%s: 3 inp shape: [%lld, %lld, %lld, %lld]\n", __func__, inp->ne[0],
-            // inp->ne[1],inp->ne[2],inp->ne[3]);
-
-
-    // if (model.patch_bias) {
-    //     inp = ggml_add(ctx0, inp, model.patch_bias);
-    //     cb(inp, "patch_bias", -1);
-    // }
 
 
     // ERNIE-4.5-VL uses RoPE (Rotary Position Embedding), not learned position embeddings
@@ -209,11 +181,49 @@ ggml_cgraph * clip_graph_ernie45vlmoe::build() {
     fprintf(stderr, "%s: spatial processing completed, shape [%lld, %lld]\n", __func__, spatial_out->ne[0],
             spatial_out->ne[1]);
 
+    // todo(megemini):
+    fprintf(stderr, "%s: model.mm_temp_0_w shape: [%lld, %lld, %lld]\n", __func__, model.mm_temp_0_w->ne[0], model.mm_temp_0_w->ne[1], model.mm_temp_0_w->ne[2]);
+    fprintf(stderr, "%s: model.mm_temp_2_w shape: [%lld, %lld, %lld]\n", __func__, model.mm_temp_2_w->ne[0], model.mm_temp_2_w->ne[1], model.mm_temp_2_w->ne[2]);
+    fprintf(stderr, "%s: model.mm_temp_norm_w shape: [%lld, %lld, %lld]\n", __func__, model.mm_temp_norm_w->ne[0], model.mm_temp_norm_w->ne[1], model.mm_temp_norm_w->ne[2]);
+
     ggml_tensor * resampler_out = spatial_out;
 
+    fprintf(stderr, "%s: 1 resampler_out shape: [%lld, %lld, %lld]\n", __func__, resampler_out->ne[0], resampler_out->ne[1], resampler_out->ne[2]);
+
+    resampler_out = ggml_concat(ctx0, resampler_out, resampler_out, 0);
+
+    fprintf(stderr, "%s: 2 resampler_out shape: [%lld, %lld, %lld]\n", __func__, resampler_out->ne[0], resampler_out->ne[1], resampler_out->ne[2]);
+
+
+    ggml_tensor * mm_temp_0_w = ggml_transpose(ctx0, model.mm_temp_0_w);
+    mm_temp_0_w = ggml_cont(ctx0, mm_temp_0_w);
+
+    resampler_out = ggml_mul_mat(ctx0, mm_temp_0_w, resampler_out);
+    resampler_out = ggml_add(ctx0, resampler_out, model.mm_temp_0_b);
+    cb(resampler_out, "resampler_linear_0", -1);
+
+    // GELU
+    resampler_out = ggml_gelu(ctx0, resampler_out);
+    cb(resampler_out, "resampler_gelu", -1);
+
+    ggml_tensor * mm_temp_2_w = ggml_transpose(ctx0, model.mm_temp_2_w);
+    mm_temp_2_w = ggml_cont(ctx0, mm_temp_2_w);
+
+
+    // Second linear
+    resampler_out = ggml_mul_mat(ctx0, model.mm_temp_2_w, resampler_out);
+    resampler_out = ggml_add(ctx0, resampler_out, model.mm_temp_2_b);
+    cb(resampler_out, "resampler_linear_2", -1);
+
+    // LayerNorm
+    resampler_out = build_norm(resampler_out, model.mm_temp_norm_w, model.mm_temp_norm_b, NORM_TYPE_NORMAL, eps, -1);
+    cb(resampler_out, "resampler_norm", -1);
+
+    // todo(megemini):end
+
     // Debug: check shapes before MLP
-    GGML_ASSERT(resampler_out->ne[0] == n_embd * spatial_conv_size * spatial_conv_size);  // should be 5120
-    GGML_ASSERT(resampler_out->ne[1] == n_groups);                                        // should be 400
+    // GGML_ASSERT(resampler_out->ne[0] == n_embd * spatial_conv_size * spatial_conv_size);  // should be 5120
+    // GGML_ASSERT(resampler_out->ne[1] == n_groups);                                        // should be 400
 
     // Temporal path (skip for single images)
     if (use_temporal && model.mm_temp_0_w) {
@@ -236,7 +246,7 @@ ggml_cgraph * clip_graph_ernie45vlmoe::build() {
     resampler_out = ggml_mul_mat(ctx0, mm_mlp_w, resampler_out);
 
 
-
+    
     resampler_out = ggml_add(ctx0, resampler_out, model.mm_mlp_b);
     cb(resampler_out, "mlp", -1);
 

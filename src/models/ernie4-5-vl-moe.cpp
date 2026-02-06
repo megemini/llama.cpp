@@ -27,9 +27,12 @@ llm_build_ernie4_5_vl_moe::llm_build_ernie4_5_vl_moe(const llama_model & model, 
     ggml_tensor * inp_out_ids = build_inp_out_ids();
 
     GGML_ASSERT(hparams.n_moe_layer_step > 0 && "Ernie 4.5 MoE requires n_moe_layer_step > 0");
-    // fprintf(stderr, "[DEBUG] Starting layer loop: n_layer=%d, n_layer_dense_lead=%d, n_moe_layer_step=%d\n",
+    // fprintf(stderr, "[DEBUG] Starting layer loop: n_layer=%d, n_layer_dense_lead=%d, n_moe_layer_step=%d\n", 
             // n_layer, hparams.n_layer_dense_lead, hparams.n_moe_layer_step);
 
+    // fprintf(stderr, "[ROPE] n_rot=%d, sections=[%d,%d,%d,%d], rope_type=%d, n_ctx_orig=%d, freq_base=%.2f, freq_scale=%.2f, ext_factor=%.2f, attn_factor=%.2f, beta_fast=%.2f, beta_slow=%.2f\n",
+    //         n_rot, sections[0], sections[1], sections[2], sections[3], rope_type, n_ctx_orig, freq_base, freq_scale, ext_factor, attn_factor, beta_fast, beta_slow);
+    
     for (int il = 0; il < n_layer; ++il) {
         // fprintf(stderr, "[DEBUG] ========== Layer %d start ==========\n", il);
         ggml_tensor * inpSA = inpL;
@@ -68,29 +71,137 @@ llm_build_ernie4_5_vl_moe::llm_build_ernie4_5_vl_moe(const llama_model & model, 
 
             // todo(megemini): GGML_ROPE_TYPE_MROPE
             if (ubatch.embd) {
+                sections[0] = 22*2;
+                sections[1] = 22*2;
+                sections[2] = 20*2;
+                sections[3] = 0;
+
+                // fprintf(stderr, "[ROPE_CALL] 1 Qcur.ne=[%ld,%ld,%ld,%ld], inp_pos.ne=[%ld,%ld,%ld,%ld], n_rot=%d, sections=[%d,%d,%d,%d], rope_type=%d, n_ctx_orig=%d, n_tokens=%ld, n_head=%d\n",
+                //         Qcur->ne[0], Qcur->ne[1], Qcur->ne[2], Qcur->ne[3],
+                //         inp_pos->ne[0], inp_pos->ne[1], inp_pos->ne[2], inp_pos->ne[3],
+                //         n_rot, sections[0], sections[1], sections[2], sections[3], rope_type, n_ctx_orig, n_tokens, n_head);
+
                 Qcur = ggml_rope_multi(
                         ctx0, Qcur, inp_pos, nullptr,
-                        // n_rot, sections, rope_type, n_ctx_orig, freq_base, freq_scale,
-                        n_rot, sections, GGML_ROPE_TYPE_MROPE, n_ctx_orig, freq_base, freq_scale,
+                        n_rot, sections, rope_type, n_ctx_orig, freq_base, freq_scale,
+                        // n_rot, sections, GGML_ROPE_TYPE_MROPE, n_ctx_orig, freq_base, freq_scale,
                         ext_factor, attn_factor, beta_fast, beta_slow
                         );
 
                 Kcur = ggml_rope_multi(
                         ctx0, Kcur, inp_pos, nullptr,
-                        // n_rot, sections, rope_type, n_ctx_orig, freq_base, freq_scale,
-                        n_rot, sections, GGML_ROPE_TYPE_MROPE, n_ctx_orig, freq_base, freq_scale,
+                        n_rot, sections, rope_type, n_ctx_orig, freq_base, freq_scale,
+                        // n_rot, sections, GGML_ROPE_TYPE_MROPE, n_ctx_orig, freq_base, freq_scale,
                         ext_factor, attn_factor, beta_fast, beta_slow
                         );
-            } else {
-                Qcur = ggml_rope_ext(ctx0, Qcur, inp_pos, nullptr, n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
-                                    ext_factor, attn_factor, beta_fast, beta_slow);
+            } else {  // GGML_ROPE_TYPE_NORMAL
 
-                Kcur = ggml_rope_ext(ctx0, Kcur, inp_pos, nullptr, n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
-                                    ext_factor, attn_factor, beta_fast, beta_slow);
+                // fprintf(stderr, "[ROPE_CALL] 2 Qcur.ne=[%ld,%ld,%ld,%ld], inp_pos.ne=[%ld,%ld,%ld,%ld], n_rot=%d, sections=[%d,%d,%d,%d], rope_type=%d, n_ctx_orig=%d, n_tokens=%ld, n_head=%d\n",
+                //         Qcur->ne[0], Qcur->ne[1], Qcur->ne[2], Qcur->ne[3],
+                //         inp_pos->ne[0], inp_pos->ne[1], inp_pos->ne[2], inp_pos->ne[3],
+                //         n_rot, sections[0], sections[1], sections[2], sections[3], rope_type, n_ctx_orig, n_tokens, n_head);
 
+                // sections[0] = Qcur->ne[1]/4;
+                // sections[1] = Qcur->ne[1]/4;
+                // sections[2] = Qcur->ne[1]/4;
+                // sections[3] = Qcur->ne[1]/4;
+
+
+                // Qcur = ggml_rope_multi(
+                //         ctx0, Qcur, inp_pos, nullptr,
+                //         Qcur->ne[1], sections, GGML_ROPE_TYPE_MROPE, n_ctx_orig, freq_base, freq_scale,
+                //         // n_rot, sections, rope_type, n_ctx_orig, freq_base, freq_scale,
+                //         ext_factor, attn_factor, beta_fast, beta_slow
+                //         );
+
+                // sections[0] = Kcur->ne[1]/4;
+                // sections[1] = Kcur->ne[1]/4;
+                // sections[2] = Kcur->ne[1]/4;
+                // sections[3] = Kcur->ne[1]/4;
+
+
+                // Kcur = ggml_rope_multi(
+                //         ctx0, Kcur, inp_pos, nullptr,
+                //         Kcur->ne[1], sections, GGML_ROPE_TYPE_MROPE, n_ctx_orig, freq_base, freq_scale,
+                //         // n_rot, sections, rope_type, n_ctx_orig, freq_base, freq_scale,
+                //         ext_factor, attn_factor, beta_fast, beta_slow
+                //         );
+
+
+
+
+
+
+
+                // // Qcur = ggml_rope_ext(ctx0, Qcur, inp_pos, nullptr, n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
+                // Qcur = ggml_rope_ext(ctx0, Qcur, inp_pos, nullptr, n_rot, GGML_ROPE_TYPE_NORMAL, n_ctx_orig, freq_base, freq_scale,
+                //                     ext_factor, attn_factor, beta_fast, beta_slow);
+
+                // // Kcur = ggml_rope_ext(ctx0, Kcur, inp_pos, nullptr, n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
+                // Kcur = ggml_rope_ext(ctx0, Kcur, inp_pos, nullptr, n_rot, GGML_ROPE_TYPE_NORMAL, n_ctx_orig, freq_base, freq_scale,
+                //                     ext_factor, attn_factor, beta_fast, beta_slow);
+
+
+
+
+
+
+
+                int d = n_rot;  // head_dim, 例如 128
+
+                // Step 1: deinterleave
+                ggml_tensor * tmp_Qcur = ggml_reshape_4d(ctx0, Qcur, 2, n_embd_head/2, n_head, n_tokens);
+                tmp_Qcur = ggml_cont(ctx0, ggml_permute(ctx0, tmp_Qcur, 1, 0, 2, 3));
+                tmp_Qcur = ggml_reshape_3d(ctx0, tmp_Qcur, n_embd_head, n_head, n_tokens);
+
+                // Step 2: rope_multi
+                // ggml_tensor * mrope_pos = ggml_concat(ctx0,
+                //     ggml_concat(ctx0, inp_pos, inp_pos, 0),
+                //     ggml_concat(ctx0, inp_pos, inp_pos, 0), 0);
+                int sections[4] = { d/2, 0, 0, 0 };
+                tmp_Qcur = ggml_rope_multi(ctx0, tmp_Qcur, inp_pos, nullptr,
+                        d, sections, GGML_ROPE_TYPE_MROPE,
+                        n_ctx_orig, freq_base, freq_scale,
+                        ext_factor, attn_factor, beta_fast, beta_slow);
+
+                // Step 3: interleave
+                tmp_Qcur = ggml_reshape_4d(ctx0, tmp_Qcur, n_embd_head/2, 2, n_head, n_tokens);
+                tmp_Qcur = ggml_cont(ctx0, ggml_permute(ctx0, tmp_Qcur, 1, 0, 2, 3));
+                Qcur = ggml_reshape_3d(ctx0, tmp_Qcur, n_embd_head, n_head, n_tokens);
+
+
+    
+                ggml_tensor * tmp_Kcur = ggml_reshape_4d(ctx0, Kcur, 2, n_embd_head/2, n_head_kv, n_tokens);
+                tmp_Kcur = ggml_cont(ctx0, ggml_permute(ctx0, tmp_Kcur, 1, 0, 2, 3));
+                tmp_Kcur = ggml_reshape_3d(ctx0, tmp_Kcur, n_embd_head, n_head_kv, n_tokens);
+
+                // Step 2: rope_multi
+                // ggml_tensor * mrope_pos = ggml_concat(ctx0,
+                //     ggml_concat(ctx0, inp_pos, inp_pos, 0),
+                //     ggml_concat(ctx0, inp_pos, inp_pos, 0), 0);
+                // int sections[4] = { d/2, 0, 0, 0 };
+                tmp_Kcur = ggml_rope_multi(ctx0, tmp_Kcur, inp_pos, nullptr,
+                        d, sections, GGML_ROPE_TYPE_MROPE,
+                        n_ctx_orig, freq_base, freq_scale,
+                        ext_factor, attn_factor, beta_fast, beta_slow);
+
+                // Step 3: interleave
+                tmp_Kcur = ggml_reshape_4d(ctx0, tmp_Kcur, n_embd_head/2, 2, n_head_kv, n_tokens);
+                tmp_Kcur = ggml_cont(ctx0, ggml_permute(ctx0, tmp_Kcur, 1, 0, 2, 3));
+                Kcur = ggml_reshape_3d(ctx0, tmp_Kcur, n_embd_head, n_head_kv, n_tokens);
 
             }
 
+
+
+
+
+
+            // Qcur = ggml_rope_ext(ctx0, Qcur, inp_pos, nullptr, n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
+            //                     ext_factor, attn_factor, beta_fast, beta_slow);
+
+            // Kcur = ggml_rope_ext(ctx0, Kcur, inp_pos, nullptr, n_rot, rope_type, n_ctx_orig, freq_base, freq_scale,
+            //                     ext_factor, attn_factor, beta_fast, beta_slow);
 
             cb(Qcur, "Qcur", il);
             cb(Kcur, "Kcur", il);
@@ -133,9 +244,9 @@ llm_build_ernie4_5_vl_moe::llm_build_ernie4_5_vl_moe(const llama_model & model, 
         } else {
             // MoE branch
             // fprintf(stderr, "[DEBUG] Layer %d: Processing MoE branch\n", il);
-            // fprintf(stderr, "[DEBUG] Layer %d: is_moe_layer=%d, n_layer_dense_lead=%d, n_moe_layer_step=%d\n",
+            // fprintf(stderr, "[DEBUG] Layer %d: is_moe_layer=%d, n_layer_dense_lead=%d, n_moe_layer_step=%d\n", 
                     // il, is_moe_layer, hparams.n_layer_dense_lead, hparams.n_moe_layer_step);
-
+            
             cur = build_norm(ffn_inp, model.layers[il].ffn_norm, NULL, LLM_NORM_RMS, il);
             cb(cur, "ffn_norm", il);
             // fprintf(stderr, "[DEBUG] Layer %d: Completed ffn_norm\n", il);
@@ -148,14 +259,14 @@ llm_build_ernie4_5_vl_moe::llm_build_ernie4_5_vl_moe(const llama_model & model, 
 
             // todo(megemini):
             if (ubatch.embd) {
-                // fprintf(stderr, "[DEBUG] Layer %d: Using v_ffn (vision) path, n_expert=%d, n_expert_used=%d\n",
+                // fprintf(stderr, "[DEBUG] Layer %d: Using v_ffn (vision) path, n_expert=%d, n_expert_used=%d\n", 
                         // il, n_expert, n_expert_used);
                 moe_out = build_moe_ffn(cur,
-                                            model.layers[il].ffn_gate_inp,
-                                            model.layers[il].ffn_up_exps,
-                                            model.layers[il].ffn_gate_exps,
-                                            model.layers[il].ffn_down_exps,
-                                            model.layers[il].ffn_exp_probs_b,
+                                            model.layers[il].v_ffn_gate_inp,
+                                            model.layers[il].v_ffn_up_exps,
+                                            model.layers[il].v_ffn_gate_exps,
+                                            model.layers[il].v_ffn_down_exps,
+                                            model.layers[il].v_ffn_exp_probs_b,
                                             n_expert, n_expert_used,
                                             LLM_FFN_SILU, true,
                                             false, 0.0,
@@ -166,7 +277,7 @@ llm_build_ernie4_5_vl_moe::llm_build_ernie4_5_vl_moe(const llama_model & model, 
                 // fprintf(stderr, "[DEBUG] Layer %d: Completed v_ffn MoE\n", il);
 
             } else {
-                // fprintf(stderr, "[DEBUG] Layer %d: Using standard ffn path, n_expert=%d, n_expert_used=%d\n",
+                // fprintf(stderr, "[DEBUG] Layer %d: Using standard ffn path, n_expert=%d, n_expert_used=%d\n", 
                         // il, n_expert, n_expert_used);
                 moe_out = build_moe_ffn(cur,
                                             model.layers[il].ffn_gate_inp,
@@ -218,7 +329,7 @@ llm_build_ernie4_5_vl_moe::llm_build_ernie4_5_vl_moe(const llama_model & model, 
         // fprintf(stderr, "[DEBUG] ========== Layer %d end ==========\n", il);
     }
     // fprintf(stderr, "[DEBUG] Layer loop completed\n");
-
+    
     cur = inpL;
     // fprintf(stderr, "[DEBUG] Starting output processing\n");
 
